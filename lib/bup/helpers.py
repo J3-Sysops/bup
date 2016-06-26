@@ -12,6 +12,7 @@ import hashlib, heapq, math, operator, time, grp, tempfile
 from bup import _helpers
 from bup import compat
 
+
 class Nonlocal:
     """Helper to deal with Python scoping issues"""
     pass
@@ -26,8 +27,7 @@ if sc_arg_max == -1:  # "no definite limit" - let's choose 2M
 
 # This function should really be in helpers, not in bup.options.  But we
 # want options.py to be standalone so people can include it in other projects.
-from bup.options import _tty_width
-tty_width = _tty_width
+from bup.options import _tty_width as tty_width
 
 
 def last(iterable):
@@ -126,17 +126,23 @@ def stat_if_exists(path):
 # leading to race conditions.  Ick.  We'll do it the hard way.
 def _hard_write(fd, buf):
     while buf:
-        (r,w,x) = select.select([], [fd], [], None)
+        try:
+            r, w, x = select.select([], [fd], [], None)
+        except select.error as ex:
+            rc, msg = ex
+            if rc == errno.EINTR:
+                continue
+            raise
         if not w:
             raise IOError('select(fd) returned without being writable')
         try:
             sz = os.write(fd, buf)
         except OSError as e:
-            if e.errno != errno.EAGAIN:
+            if e.errno not in (errno.EAGAIN, errno.EINTR):
                 raise
-        assert(sz >= 0)
-        buf = buf[sz:]
-
+        assert sz >= 0
+        buf = memoryview(buf)[sz:]
+    
 
 _last_prog = 0
 def log(s):
@@ -940,7 +946,7 @@ def handle_ctrl_c():
     oldhook = sys.excepthook
     def newhook(exctype, value, traceback):
         if exctype == KeyboardInterrupt:
-            log('\nInterrupted.\n')
+            log('\nInterrupted\n')
         else:
             return oldhook(exctype, value, traceback)
     sys.excepthook = newhook
